@@ -48,10 +48,8 @@ func ParseRequest(bufConn io.Reader) (*Request, error) {
 }
 
 // handleRequest is used for request processing after authentication
-func (sf *Server) handleRequest(write io.Writer, req *Request) error {
+func (sf *Server) handleRequest(ctx context.Context, write io.Writer, req *Request) error {
 	var err error
-
-	ctx := context.Background()
 	// Resolve the address if we have a FQDN
 	dest := req.RawDestAddr
 	if dest.FQDN != "" {

@@ -16,3 +16,12 @@ func TestDNSResolver(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, addr.IsLoopback())
 }
+
+func TestDNSResolver_ContextCancelled(t *testing.T) {
+	d := DNSResolver{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := d.Resolve(ctx, "localhost")
+	require.Error(t, err)
+}

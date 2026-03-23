@@ -2,6 +2,7 @@ package socks5
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log"
 	"net"
@@ -66,7 +67,7 @@ func TestRequest_Connect(t *testing.T) {
 	req, err := ParseRequest(buf)
 	require.NoError(t, err)
 
-	err = proxySrv.handleRequest(rsp, req)
+	err = proxySrv.handleRequest(context.Background(), rsp, req)
 	require.NoError(t, err)
 
 	// Verify response
@@ -124,7 +125,7 @@ func TestRequest_Connect_RuleFail(t *testing.T) {
 	req, err := ParseRequest(buf)
 	require.NoError(t, err)
 
-	err = s.handleRequest(rsp, req)
+	err = s.handleRequest(context.Background(), rsp, req)
 	require.Contains(t, err.Error(), "blocked by rules")
 
 	// Verify response

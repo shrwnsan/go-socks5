@@ -15,9 +15,10 @@ type DNSResolver struct{}
 
 // Resolve implement interface NameResolver
 func (d DNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
-	addr, err := net.ResolveIPAddr("ip", name)
-	if err != nil {
+	resolver := &net.Resolver{}
+	ips, err := resolver.LookupIPAddr(ctx, name)
+	if err != nil || len(ips) == 0 {
 		return ctx, nil, err
 	}
-	return ctx, addr.IP, err
+	return ctx, ips[0].IP, nil
 }

@@ -185,7 +185,7 @@ func (sf *Server) ServeConn(conn net.Conn) error {
 	request.LocalAddr = conn.LocalAddr()
 	request.RemoteAddr = conn.RemoteAddr()
 	// Process the client request
-	err = sf.handleRequest(conn, request)
+	err = sf.handleRequest(context.Background(), conn, request)
 	if sf.handshakeTimeout > 0 {
 		_ = conn.SetDeadline(time.Time{})
 	}
