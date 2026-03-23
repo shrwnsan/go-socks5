@@ -136,3 +136,35 @@ func TestRequest_Connect_RuleFail(t *testing.T) {
 	}
 	require.Equal(t, expected, out)
 }
+
+func TestRequest_InvalidDest(t *testing.T) {
+	s := &Server{
+		rules:      NewPermitAll(),
+		resolver:   DNSResolver{},
+		logger:     NewLogger(log.New(io.Discard, "socks5: ", log.LstdFlags)),
+		bufferPool: bufferpool.NewPool(32 * 1024),
+	}
+
+	req := &Request{
+		Request: statute.Request{
+			Version:  statute.VersionSocks5,
+			Command:  statute.CommandConnect,
+			Reserved: 0,
+			DstAddr: statute.AddrSpec{
+				FQDN:     "localhost",
+				Port:     70000,
+				AddrType: statute.ATYPDomain,
+			},
+		},
+		RawDestAddr: &statute.AddrSpec{
+			FQDN:     "localhost",
+			Port:     70000,
+			AddrType: statute.ATYPDomain,
+		},
+		Reader: bytes.NewBuffer(nil),
+	}
+
+	rsp := new(MockConn)
+	callErr := s.handleRequest(context.Background(), rsp, req)
+	require.Error(t, callErr)
+}

@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/things-go/go-socks5/bufferpool"
@@ -60,6 +62,12 @@ type Server struct {
 	gPool GPool
 	// handshakeTimeout sets a deadline for auth + request parsing.
 	handshakeTimeout time.Duration
+	// maxConns limits concurrent connections; 0 means unlimited.
+	maxConns int32
+	// conns tracks active connections.
+	conns int32
+	// wg tracks active connection goroutines.
+	wg sync.WaitGroup
 	// user's handle
 	userConnectHandle   func(ctx context.Context, writer io.Writer, request *Request) error
 	userBindHandle      func(ctx context.Context, writer io.Writer, request *Request) error
@@ -97,6 +105,21 @@ func NewServer(opts ...Option) *Server {
 	return srv
 }
 
+// Shutdown waits for active connections to finish.
+func (sf *Server) Shutdown(ctx context.Context) error {
+	ch := make(chan struct{})
+	go func() {
+		sf.wg.Wait()
+		close(ch)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-ch:
+		return nil
+	}
+}
+
 // ListenAndServe is used to create a listener and serve on it
 func (sf *Server) ListenAndServe(network, addr string) error {
 	l, err := net.Listen(network, addr) // nolint: noctx
@@ -104,6 +127,15 @@ func (sf *Server) ListenAndServe(network, addr string) error {
 		return err
 	}
 	return sf.Serve(l)
+}
+
+// ListenAndServeContext is used to create a listener and serve on it with context.
+func (sf *Server) ListenAndServeContext(ctx context.Context, network, addr string) error {
+	l, err := net.Listen(network, addr) // nolint: noctx
+	if err != nil {
+		return err
+	}
+	return sf.ServeContext(ctx, l)
 }
 
 // ListenAndServeTLS is used to create a TLS listener and serve on it
@@ -117,13 +149,37 @@ func (sf *Server) ListenAndServeTLS(network, addr string, c *tls.Config) error {
 
 // Serve is used to serve connections from a listener
 func (sf *Server) Serve(l net.Listener) error {
+	return sf.ServeContext(context.Background(), l)
+}
+
+// ServeContext is used to serve connections from a listener with context.
+func (sf *Server) ServeContext(ctx context.Context, l net.Listener) error {
 	defer l.Close() // nolint: errcheck
+	go func() {
+		<-ctx.Done()
+		_ = l.Close()
+	}()
 	for {
 		conn, err := l.Accept()
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
+		if sf.maxConns > 0 {
+			if atomic.AddInt32(&sf.conns, 1) > sf.maxConns {
+				atomic.AddInt32(&sf.conns, -1)
+				conn.Close() // nolint: errcheck
+				continue
+			}
+		} else {
+			atomic.AddInt32(&sf.conns, 1)
+		}
+		sf.wg.Add(1)
 		sf.goFunc(func() {
+			defer sf.wg.Done()
+			defer atomic.AddInt32(&sf.conns, -1)
 			if err := sf.ServeConn(conn); err != nil {
 				sf.logger.Errorf("server: %v", err)
 			}
@@ -135,7 +191,11 @@ func (sf *Server) Serve(l net.Listener) error {
 func (sf *Server) ServeConn(conn net.Conn) error {
 	var authContext *AuthContext
 
-	defer conn.Close() // nolint: errcheck
+	defer func() {
+		if cerr := conn.Close(); cerr != nil {
+			sf.logger.Errorf("close conn failed, %v", cerr)
+		}
+	}()
 	if sf.handshakeTimeout > 0 {
 		if err := conn.SetDeadline(time.Now().Add(sf.handshakeTimeout)); err != nil {
 			return err

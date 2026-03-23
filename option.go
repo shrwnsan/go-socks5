@@ -187,3 +187,10 @@ func WithHandshakeTimeout(d time.Duration) Option {
 		s.handshakeTimeout = d
 	}
 }
+
+// WithMaxConns limits concurrent connections; 0 means unlimited.
+func WithMaxConns(max int32) Option {
+	return func(s *Server) {
+		s.maxConns = max
+	}
+}

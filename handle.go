@@ -6,11 +6,28 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/things-go/go-socks5/statute"
 )
+
+func responseFromDialError(err error) uint8 {
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return statute.RepTTLExpired
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		switch {
+		case errors.Is(opErr.Err, syscall.ECONNREFUSED):
+			return statute.RepConnectionRefused
+		case errors.Is(opErr.Err, syscall.ENETUNREACH):
+			return statute.RepNetworkUnreachable
+		}
+	}
+	return statute.RepHostUnreachable
+}
 
 // AddressRewriter is used to rewrite a destination transparently
 type AddressRewriter interface {
@@ -52,6 +69,12 @@ func (sf *Server) handleRequest(ctx context.Context, write io.Writer, req *Reque
 	var err error
 	// Resolve the address if we have a FQDN
 	dest := req.RawDestAddr
+	if err := dest.Validate(); err != nil {
+		if err := SendReply(write, statute.RepAddrTypeNotSupported, nil); err != nil {
+			return fmt.Errorf("failed to send reply, %v", err)
+		}
+		return fmt.Errorf("invalid destination address: %w", err)
+	}
 	if dest.FQDN != "" {
 		ctx, dest.IP, err = sf.resolver.Resolve(ctx, dest.FQDN)
 		if err != nil {
@@ -132,19 +155,17 @@ func (sf *Server) handleConnect(ctx context.Context, writer io.Writer, request *
 		target, err = dial(ctx, "tcp", request.DestAddr.String())
 	}
 	if err != nil {
-		msg := err.Error()
-		resp := statute.RepHostUnreachable
-		if strings.Contains(msg, "refused") {
-			resp = statute.RepConnectionRefused
-		} else if strings.Contains(msg, "network is unreachable") {
-			resp = statute.RepNetworkUnreachable
-		}
+		resp := responseFromDialError(err)
 		if err := SendReply(writer, resp, nil); err != nil {
 			return fmt.Errorf("failed to send reply, %v", err)
 		}
 		return fmt.Errorf("connect to %v failed, %v", request.RawDestAddr, err)
 	}
-	defer target.Close() // nolint: errcheck
+	defer func() {
+		if cerr := target.Close(); cerr != nil {
+			sf.logger.Errorf("close target failed, %v", cerr)
+		}
+	}()
 
 	// Send success
 	if err := SendReply(writer, statute.RepSuccess, target.LocalAddr()); err != nil {
@@ -197,7 +218,14 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 			}
 		}
 	} else {
-		udpAddr = &net.UDPAddr{IP: request.LocalAddr.(*net.TCPAddr).IP, Port: 0}
+		tcpAddr, ok := request.LocalAddr.(*net.TCPAddr)
+		if !ok {
+			if err := SendReply(writer, statute.RepServerFailure, nil); err != nil {
+				return fmt.Errorf("failed to send reply, %v", err)
+			}
+			return fmt.Errorf("local address is not tcp")
+		}
+		udpAddr = &net.UDPAddr{IP: tcpAddr.IP, Port: 0}
 	}
 	bindLn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
@@ -219,12 +247,16 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 		bufPool := sf.bufferPool.Get()
 		defer func() {
 			sf.bufferPool.Put(bufPool)
-			bindLn.Close() // nolint: errcheck
+			if cerr := bindLn.Close(); cerr != nil {
+				sf.logger.Errorf("close udp listener failed, %v", cerr)
+			}
 			conns.Range(func(key, value any) bool {
 				if connTarget, ok := value.(net.Conn); !ok {
 					sf.logger.Errorf("conns has illegal item %v:%v", key, value)
 				} else {
-					connTarget.Close() // nolint: errcheck
+					if cerr := connTarget.Close(); cerr != nil {
+						sf.logger.Errorf("close udp target failed, %v", cerr)
+					}
 				}
 				return true
 			})
@@ -279,7 +311,9 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 			sf.goFunc(func() {
 				bufPool := sf.bufferPool.Get()
 				defer func() {
-					targetNew.Close() // nolint: errcheck
+					if cerr := targetNew.Close(); cerr != nil {
+						sf.logger.Errorf("close udp target failed, %v", cerr)
+					}
 					conns.Delete(connKey)
 					sf.bufferPool.Put(bufPool)
 				}()
@@ -320,7 +354,9 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 		_, err := request.Reader.Read(buf[:cap(buf)])
 		// sf.logger.Errorf("read data from client %s, %d bytesm, err is %+v", request.RemoteAddr.String(), num, err)
 		if err != nil {
-			bindLn.Close() // nolint: errcheck
+			if cerr := bindLn.Close(); cerr != nil {
+				sf.logger.Errorf("close udp listener failed, %v", cerr)
+			}
 			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
 				return nil
 			}

@@ -80,6 +80,12 @@ func TestParseAddrSpec(t *testing.T) {
 			AddrSpec{},
 			true,
 		},
+		{
+			"invalid port range",
+			"localhost:70000",
+			AddrSpec{Port: 70000},
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

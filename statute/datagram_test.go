@@ -126,6 +126,12 @@ func TestParseDatagram(t *testing.T) {
 			Datagram{},
 			true,
 		},
+		{
+			"fragmentation not supported",
+			[]byte{0, 0, 1, ATYPIPv4, 127, 0, 0, 1, 0x1f, 0x90},
+			Datagram{},
+			true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

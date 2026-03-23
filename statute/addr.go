@@ -48,6 +48,10 @@ func ParseAddrSpec(addr string) (as AddrSpec, err error) {
 	if err != nil {
 		return
 	}
+	if as.Port < 0 || as.Port > 65535 {
+		err = fmt.Errorf("invalid port number: %d", as.Port)
+		return
+	}
 
 	ip := net.ParseIP(host)
 	if ip4 := ip.To4(); ip4 != nil {
@@ -58,4 +62,18 @@ func ParseAddrSpec(addr string) (as AddrSpec, err error) {
 		as.AddrType, as.FQDN = ATYPDomain, host
 	}
 	return
+}
+
+// Validate checks AddrSpec for basic correctness.
+func (sf *AddrSpec) Validate() error {
+	if sf.Port < 0 || sf.Port > 65535 {
+		return fmt.Errorf("invalid port: %d", sf.Port)
+	}
+	if len(sf.IP) == 0 && sf.FQDN == "" {
+		return fmt.Errorf("missing address")
+	}
+	if len(sf.IP) != 0 && len(sf.IP) != net.IPv4len && len(sf.IP) != net.IPv6len {
+		return fmt.Errorf("invalid ip length: %d", len(sf.IP))
+	}
+	return nil
 }

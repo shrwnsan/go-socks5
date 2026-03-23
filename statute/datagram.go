@@ -47,6 +47,10 @@ func ParseDatagram(b []byte) (da Datagram, err error) {
 	// ignore RSV
 	// get FRAG and Address  type
 	da.RSV, da.Frag, da.DstAddr.AddrType = 0, b[2], b[3]
+	if da.Frag != 0 {
+		err = errors.New("fragmentation not supported")
+		return
+	}
 
 	headLen := 4
 	switch da.DstAddr.AddrType {
