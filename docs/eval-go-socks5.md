@@ -4,7 +4,7 @@
 **Version:** Latest (as of review)  
 **Reviewer:** Security Audit  
 **Date:** 2026-03-23
-**Document Version:** v1.1
+**Document Version:** v1.2
 
 ---
 
@@ -1149,6 +1149,11 @@ If the proxy is exposed publicly, prioritize **timing-attack fixes (#16)** along
 
 ## 🧾 CHANGELOG
 
+### v1.2 — 2026-03-23
+- Implemented critical fixes: secure default auth opt-in, constant-time password comparison, auth rate limiting interface + helper, handshake deadline, UDP associate race fix, nil IP handling, context propagation + DNS resolution context, error classification, close error handling, AddrSpec validation + port range check, UDP FRAG rejection, bind addr type assertion safety, graceful shutdown + connection tracking + max conns.
+- Added tests for middleware chain, limiter helper, lifecycle, resolver context, and validation paths.
+- Added open-proxy warning and limiter usage note.
+
 ### v1.1 — 2026-03-23
 - Added independent review deltas: timing attack in password comparison, UDP associate race condition, DNS resolution context usage, port range validation, unhandled write error in auth, and nil IP handling in UDP validation.
 - Expanded review comparison metrics and recommendations.
@@ -1163,24 +1168,24 @@ If the proxy is exposed publicly, prioritize **timing-attack fixes (#16)** along
 When ready to apply fixes, tackle in this order:
 
 ### Phase 1: Critical Bug Fixes
-- [ ] Fix middleware chain (`option.go:138-148`)
-- [ ] Add constant-time password comparison (`credentials.go`)
-- [ ] Add type assertion safety check (`handle.go:202`)
+- [x] Fix middleware chain (`option.go:138-148`)
+- [x] Add constant-time password comparison (`credentials.go`)
+- [x] Add type assertion safety check (`handle.go:202`)
 
 ### Phase 2: Concurrency & Resource Management
-- [ ] Use `LoadOrStore` in UDP associate (`handle.go:255-263`)
-- [ ] Add graceful shutdown with `Shutdown(ctx)` method
-- [ ] Add max connection limit with atomic counter
-- [ ] Add `sync.WaitGroup` for connection tracking
+- [x] Use `LoadOrStore` in UDP associate (`handle.go:255-263`)
+- [x] Add graceful shutdown with `Shutdown(ctx)` method
+- [x] Add max connection limit with atomic counter
+- [x] Add `sync.WaitGroup` for connection tracking
 
 ### Phase 3: Context & Error Handling
-- [ ] Propagate context through request handling
-- [ ] Honor context in DNS resolution
-- [ ] Use `errors.Is/As` for error classification
-- [ ] Handle Close() errors properly
+- [x] Propagate context through request handling
+- [x] Honor context in DNS resolution
+- [x] Use `errors.Is/As` for error classification
+- [x] Handle Close() errors properly
 
 ### Phase 4: Code Quality
 - [ ] Fix comment typos
-- [ ] Add port range validation
-- [ ] Add nil IP check in UDP validation
+- [x] Add port range validation
+- [x] Add nil IP check in UDP validation
 - [ ] Add metrics interface
