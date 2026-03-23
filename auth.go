@@ -13,8 +13,15 @@ type AuthContext struct {
 	Method uint8
 	// Payload provided during negotiation.
 	// Keys depend on the used auth method.
-	// For UserPass auth contains username/password
+	// For UserPass auth contains username
 	Payload map[string]string
+}
+
+// AuthLimiter is used to limit authentication attempts.
+type AuthLimiter interface {
+	Allow(user, userAddr string) bool
+	Failed(user, userAddr string)
+	Succeeded(user, userAddr string)
 }
 
 // Authenticator provide auth
@@ -39,6 +46,7 @@ func (a NoAuthAuthenticator) Authenticate(_ io.Reader, writer io.Writer, _ strin
 // authentication
 type UserPassAuthenticator struct {
 	Credentials CredentialStore
+	Limiter     AuthLimiter
 }
 
 // GetCode implement interface Authenticator
@@ -56,12 +64,27 @@ func (a UserPassAuthenticator) Authenticate(reader io.Reader, writer io.Writer, 
 		return nil, err
 	}
 
-	// Verify the password
-	if !a.Credentials.Valid(string(nup.User), string(nup.Pass), userAddr) {
+	user := string(nup.User)
+	pass := string(nup.Pass)
+	if a.Limiter != nil && !a.Limiter.Allow(user, userAddr) {
 		if _, err := writer.Write([]byte{statute.UserPassAuthVersion, statute.AuthFailure}); err != nil {
 			return nil, err
 		}
 		return nil, statute.ErrUserAuthFailed
+	}
+
+	// Verify the password
+	if !a.Credentials.Valid(user, pass, userAddr) {
+		if a.Limiter != nil {
+			a.Limiter.Failed(user, userAddr)
+		}
+		if _, err := writer.Write([]byte{statute.UserPassAuthVersion, statute.AuthFailure}); err != nil {
+			return nil, err
+		}
+		return nil, statute.ErrUserAuthFailed
+	}
+	if a.Limiter != nil {
+		a.Limiter.Succeeded(user, userAddr)
 	}
 
 	if _, err := writer.Write([]byte{statute.UserPassAuthVersion, statute.AuthSuccess}); err != nil {
@@ -71,8 +94,7 @@ func (a UserPassAuthenticator) Authenticate(reader io.Reader, writer io.Writer, 
 	return &AuthContext{
 		statute.MethodUserPassAuth,
 		map[string]string{
-			"username": string(nup.User),
-			"password": string(nup.Pass),
+			"username": user,
 		},
 	}, nil
 }

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"time"
 
 	"github.com/things-go/go-socks5/bufferpool"
 	"github.com/things-go/go-socks5/statute"
@@ -23,13 +24,13 @@ type GPool interface {
 // the details of the SOCKS5 protocol
 type Server struct {
 	// authMethods can be provided to implement authentication
-	// By default, "no-auth" mode is enabled.
 	// For password-based auth use UserPassAuthenticator.
 	authMethods []Authenticator
 	// If provided, username/password authentication is enabled,
-	// by appending a UserPassAuthenticator to AuthMethods. If not provided,
-	// and authMethods is nil, then "no-auth" mode is enabled.
+	// by appending a UserPassAuthenticator to AuthMethods.
 	credentials CredentialStore
+	// allowNoAuth enables default no-auth mode when no authMethods/credentials are provided.
+	allowNoAuth bool
 	// resolver can be provided to do custom name resolution.
 	// Defaults to DNSResolver if not provided.
 	resolver NameResolver
@@ -57,6 +58,8 @@ type Server struct {
 	bufferPool bufferpool.BufPool
 	// goroutine pool
 	gPool GPool
+	// handshakeTimeout sets a deadline for auth + request parsing.
+	handshakeTimeout time.Duration
 	// user's handle
 	userConnectHandle   func(ctx context.Context, writer io.Writer, request *Request) error
 	userBindHandle      func(ctx context.Context, writer io.Writer, request *Request) error
@@ -75,6 +78,7 @@ func NewServer(opts ...Option) *Server {
 		resolver:    DNSResolver{},
 		rules:       NewPermitAll(),
 		logger:      NewLogger(log.New(io.Discard, "socks5: ", log.LstdFlags)),
+		handshakeTimeout: 10 * time.Second,
 	}
 
 	for _, opt := range opts {
@@ -83,9 +87,9 @@ func NewServer(opts ...Option) *Server {
 
 	// Ensure we have at least one authentication method enabled
 	if (len(srv.authMethods) == 0) && srv.credentials != nil {
-		srv.authMethods = []Authenticator{&UserPassAuthenticator{srv.credentials}}
+		srv.authMethods = []Authenticator{&UserPassAuthenticator{Credentials: srv.credentials}}
 	}
-	if len(srv.authMethods) == 0 {
+	if len(srv.authMethods) == 0 && srv.allowNoAuth {
 		srv.authMethods = []Authenticator{&NoAuthAuthenticator{}}
 	}
 
@@ -131,6 +135,11 @@ func (sf *Server) ServeConn(conn net.Conn) error {
 	var authContext *AuthContext
 
 	defer conn.Close() // nolint: errcheck
+	if sf.handshakeTimeout > 0 {
+		if err := conn.SetDeadline(time.Now().Add(sf.handshakeTimeout)); err != nil {
+			return err
+		}
+	}
 
 	bufConn := bufio.NewReader(conn)
 
@@ -176,7 +185,11 @@ func (sf *Server) ServeConn(conn net.Conn) error {
 	request.LocalAddr = conn.LocalAddr()
 	request.RemoteAddr = conn.RemoteAddr()
 	// Process the client request
-	return sf.handleRequest(conn, request)
+	err = sf.handleRequest(conn, request)
+	if sf.handshakeTimeout > 0 {
+		_ = conn.SetDeadline(time.Time{})
+	}
+	return err
 }
 
 // authenticate is used to handle connection authentication
@@ -191,7 +204,9 @@ func (sf *Server) authenticate(conn io.Writer, bufConn io.Reader,
 		}
 	}
 	// No usable method found
-	conn.Write([]byte{statute.VersionSocks5, statute.MethodNoAcceptable}) //nolint: errcheck
+	if _, err := conn.Write([]byte{statute.VersionSocks5, statute.MethodNoAcceptable}); err != nil {
+		return nil, fmt.Errorf("failed to send method rejection: %w", err)
+	}
 	return nil, statute.ErrNoSupportedAuth
 }
 

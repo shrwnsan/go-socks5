@@ -40,8 +40,9 @@ func TestSOCKS5_Connect(t *testing.T) {
 		lAddr := l.Addr().(*net.TCPAddr)
 
 		// Create a socks server with UserPass auth.
-		cator := UserPassAuthenticator{StaticCredentials{"foo": "bar"}}
+		cator := UserPassAuthenticator{Credentials: StaticCredentials{"foo": "bar"}}
 		srv := NewServer(
+			WithAllowNoAuth(true),
 			WithAuthMethods([]Authenticator{cator}),
 			WithLogger(NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
 			WithDialAndRequest(func(ctx context.Context, network, addr string, request *Request) (net.Conn, error) {
@@ -136,8 +137,9 @@ func TestSOCKS5_Connect(t *testing.T) {
 		lAddr := l.Addr().(*net.TCPAddr)
 
 		// Create a socks server with UserPass auth.
-		cator := UserPassAuthenticator{StaticCredentials{"foo": "bar"}}
+		cator := UserPassAuthenticator{Credentials: StaticCredentials{"foo": "bar"}}
 		srv := NewServer(
+			WithAllowNoAuth(true),
 			WithAuthMethods([]Authenticator{cator}),
 			WithLogger(NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
 			WithDialAndRequest(func(ctx context.Context, network, addr string, request *Request) (net.Conn, error) {
@@ -252,8 +254,9 @@ func TestSOCKS5_Connect(t *testing.T) {
 		lAddr := l.Addr().(*net.TCPAddr)
 
 		// Create a socks server with UserPass auth.
-		cator := UserPassAuthenticator{StaticCredentials{"foo": "bar"}}
+		cator := UserPassAuthenticator{Credentials: StaticCredentials{"foo": "bar"}}
 		srv := NewServer(
+			WithAllowNoAuth(true),
 			WithAuthMethods([]Authenticator{cator}),
 			WithLogger(NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
 			WithDialAndRequest(func(ctx context.Context, network, addr string, request *Request) (net.Conn, error) {
@@ -356,8 +359,9 @@ func TestSOCKS5_Connect(t *testing.T) {
 		lAddr := l.Addr().(*net.TCPAddr)
 
 		// Create a socks server with UserPass auth.
-		cator := UserPassAuthenticator{StaticCredentials{"foo": "bar"}}
+		cator := UserPassAuthenticator{Credentials: StaticCredentials{"foo": "bar"}}
 		srv := NewServer(
+			WithAllowNoAuth(true),
 			WithAuthMethods([]Authenticator{cator}),
 			WithLogger(NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
 			WithDialAndRequest(func(ctx context.Context, network, addr string, request *Request) (net.Conn, error) {
@@ -464,8 +468,9 @@ func TestSOCKS5_Associate(t *testing.T) {
 		defer client.Close() // nolint: errcheck
 
 		// Create a socks server
-		cator := UserPassAuthenticator{StaticCredentials{"foo": "bar"}}
+		cator := UserPassAuthenticator{Credentials: StaticCredentials{"foo": "bar"}}
 		proxySrv := NewServer(
+			WithAllowNoAuth(true),
 			WithAuthMethods([]Authenticator{cator}),
 			WithLogger(NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
 		)
@@ -565,8 +570,9 @@ func TestSOCKS5_Associate(t *testing.T) {
 		defer client.Close() // nolint: errcheck
 
 		// Create a socks server
-		cator := UserPassAuthenticator{StaticCredentials{"foo": "bar"}}
+		cator := UserPassAuthenticator{Credentials: StaticCredentials{"foo": "bar"}}
 		proxySrv := NewServer(
+			WithAllowNoAuth(true),
 			WithAuthMethods([]Authenticator{cator}),
 			WithLogger(NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
 			WithAssociateMiddleware(func(ctx context.Context, writer io.Writer, request *Request) error {
@@ -664,8 +670,9 @@ func Test_SocksWithProxy(t *testing.T) {
 	lAddr := l.Addr().(*net.TCPAddr)
 
 	// Create a socks server with UserPass auth.
-	cator := UserPassAuthenticator{StaticCredentials{"foo": "bar"}}
+	cator := UserPassAuthenticator{Credentials: StaticCredentials{"foo": "bar"}}
 	serv := NewServer(
+		WithAllowNoAuth(true),
 		WithAuthMethods([]Authenticator{cator}),
 		WithLogger(NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags))),
 	)
@@ -700,7 +707,10 @@ func Test_SocksWithProxy(t *testing.T) {
 func TestNoAuth_Server(t *testing.T) {
 	req := bytes.NewBuffer(nil)
 	rsp := new(bytes.Buffer)
-	s := NewServer(WithAuthMethods([]Authenticator{&NoAuthAuthenticator{}}))
+	s := NewServer(
+		WithAllowNoAuth(true),
+		WithAuthMethods([]Authenticator{&NoAuthAuthenticator{}}),
+	)
 
 	ctx, err := s.authenticate(rsp, req, "", []byte{statute.MethodNoAuth})
 	require.NoError(t, err)
@@ -708,11 +718,22 @@ func TestNoAuth_Server(t *testing.T) {
 	assert.Equal(t, []byte{statute.VersionSocks5, statute.MethodNoAuth}, rsp.Bytes())
 }
 
+func TestNoAuth_DefaultDisabled(t *testing.T) {
+	s := NewServer()
+	req := bytes.NewBuffer(nil)
+	rsp := new(bytes.Buffer)
+
+	ctx, err := s.authenticate(rsp, req, "", []byte{statute.MethodNoAuth})
+	require.ErrorIs(t, err, statute.ErrNoSupportedAuth)
+	require.Nil(t, ctx)
+	assert.Equal(t, []byte{statute.VersionSocks5, statute.MethodNoAcceptable}, rsp.Bytes())
+}
+
 func TestPasswordAuth_Valid_Server(t *testing.T) {
 	req := bytes.NewBuffer([]byte{1, 3, 'f', 'o', 'o', 3, 'b', 'a', 'r'})
 	rsp := new(bytes.Buffer)
 	cator := UserPassAuthenticator{
-		StaticCredentials{"foo": "bar"},
+		Credentials: StaticCredentials{"foo": "bar"},
 	}
 	s := NewServer(WithAuthMethods([]Authenticator{cator}))
 
@@ -724,10 +745,6 @@ func TestPasswordAuth_Valid_Server(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "foo", val)
 
-	val, ok = ctx.Payload["password"]
-	require.True(t, ok)
-	require.Equal(t, "bar", val)
-
 	assert.Equal(t, []byte{statute.VersionSocks5, statute.MethodUserPassAuth, 1, statute.AuthSuccess}, rsp.Bytes())
 }
 
@@ -735,7 +752,7 @@ func TestPasswordAuth_Invalid_Server(t *testing.T) {
 	req := bytes.NewBuffer([]byte{1, 3, 'f', 'o', 'o', 3, 'b', 'a', 'z'})
 	rsp := new(bytes.Buffer)
 	cator := UserPassAuthenticator{
-		StaticCredentials{"foo": "bar"},
+		Credentials: StaticCredentials{"foo": "bar"},
 	}
 	s := NewServer(WithAuthMethods([]Authenticator{cator}))
 
@@ -750,7 +767,7 @@ func TestNoSupportedAuth_Server(t *testing.T) {
 	req := bytes.NewBuffer(nil)
 	rsp := new(bytes.Buffer)
 	cator := UserPassAuthenticator{
-		StaticCredentials{"foo": "bar"},
+		Credentials: StaticCredentials{"foo": "bar"},
 	}
 
 	s := NewServer(WithAuthMethods([]Authenticator{cator}))

@@ -1,5 +1,7 @@
 package socks5
 
+import "crypto/subtle"
+
 // CredentialStore is used to support user/pass authentication optional network addr
 // if you want to limit user network addr,you can refuse it.
 type CredentialStore interface {
@@ -12,5 +14,8 @@ type StaticCredentials map[string]string
 // Valid implement interface CredentialStore
 func (s StaticCredentials) Valid(user, password, _ string) bool {
 	pass, ok := s[user]
-	return ok && password == pass
+	if !ok {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(password), []byte(pass)) == 1
 }

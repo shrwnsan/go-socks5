@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"time"
 
 	"github.com/things-go/go-socks5/bufferpool"
 )
@@ -173,5 +174,19 @@ func WithAssociateMiddleware(m Middleware) Option {
 func WithUseBindIpBaseResolveAsUdpAddr(b bool) Option {
 	return func(s *Server) {
 		s.useBindIpBaseResolveAsUdpAddr = b
+	}
+}
+
+// WithAllowNoAuth enables default no-auth mode when no auth methods are configured.
+func WithAllowNoAuth(b bool) Option {
+	return func(s *Server) {
+		s.allowNoAuth = b
+	}
+}
+
+// WithHandshakeTimeout sets the deadline for auth + request parsing.
+func WithHandshakeTimeout(d time.Duration) Option {
+	return func(s *Server) {
+		s.handshakeTimeout = d
 	}
 }
