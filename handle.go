@@ -245,62 +245,72 @@ func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request
 			}
 
 			// check src addr whether equal requst.DestAddr
-			srcEqual := ((request.DestAddr.IP.IsUnspecified()) || request.DestAddr.IP.Equal(srcAddr.IP)) && (request.DestAddr.Port == 0 || request.DestAddr.Port == srcAddr.Port) //nolint:lll
+			srcEqual := (len(request.DestAddr.IP) == 0 || request.DestAddr.IP.IsUnspecified() || request.DestAddr.IP.Equal(srcAddr.IP)) &&
+				(request.DestAddr.Port == 0 || request.DestAddr.Port == srcAddr.Port)
 			if !srcEqual {
 				continue
 			}
 
 			connKey := srcAddr.String() + "--" + pk.DstAddr.String()
 
-			if target, ok := conns.Load(connKey); !ok {
-				// if the 'connection' doesn't exist, create one and store it
-				targetNew, err := dial(ctx, "udp", pk.DstAddr.String())
-				if err != nil {
-					sf.logger.Errorf("connect to %v failed, %v", pk.DstAddr, err)
-					// TODO:continue or return Error?
-					continue
-				}
-				conns.Store(connKey, targetNew)
-				// read from remote server and write to original client
-				sf.goFunc(func() {
-					bufPool := sf.bufferPool.Get()
-					defer func() {
-						targetNew.Close() // nolint: errcheck
-						conns.Delete(connKey)
-						sf.bufferPool.Put(bufPool)
-					}()
-
-					for {
-						buf := bufPool[:cap(bufPool)]
-						n, err := targetNew.Read(buf)
-						if err != nil {
-							if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
-								return
-							}
-							sf.logger.Errorf("read data from remote %s failed, %v", targetNew.RemoteAddr().String(), err)
-							return
-						}
-						tmpBufPool := sf.bufferPool.Get()
-						proBuf := tmpBufPool
-						proBuf = append(proBuf, pk.Header()...)
-						proBuf = append(proBuf, buf[:n]...)
-						if _, err := bindLn.WriteTo(proBuf, srcAddr); err != nil {
-							sf.bufferPool.Put(tmpBufPool)
-							sf.logger.Errorf("write data to client %s failed, %v", srcAddr, err)
-							return
-						}
-						sf.bufferPool.Put(tmpBufPool)
-					}
-				})
-				if _, err := targetNew.Write(pk.Data); err != nil {
-					sf.logger.Errorf("write data to remote server %s failed, %v", targetNew.RemoteAddr().String(), err)
-					return
-				}
-			} else {
+			if target, ok := conns.Load(connKey); ok {
 				if _, err := target.(net.Conn).Write(pk.Data); err != nil {
 					sf.logger.Errorf("write data to remote server %s failed, %v", target.(net.Conn).RemoteAddr().String(), err)
 					return
 				}
+				continue
+			}
+
+			// if the 'connection' doesn't exist, create one and store it
+			targetNew, err := dial(ctx, "udp", pk.DstAddr.String())
+			if err != nil {
+				sf.logger.Errorf("connect to %v failed, %v", pk.DstAddr, err)
+				// TODO:continue or return Error?
+				continue
+			}
+			actual, loaded := conns.LoadOrStore(connKey, targetNew)
+			if loaded {
+				targetNew.Close() // nolint: errcheck
+				if _, err := actual.(net.Conn).Write(pk.Data); err != nil {
+					sf.logger.Errorf("write data to remote server %s failed, %v", actual.(net.Conn).RemoteAddr().String(), err)
+					return
+				}
+				continue
+			}
+			// read from remote server and write to original client
+			sf.goFunc(func() {
+				bufPool := sf.bufferPool.Get()
+				defer func() {
+					targetNew.Close() // nolint: errcheck
+					conns.Delete(connKey)
+					sf.bufferPool.Put(bufPool)
+				}()
+
+				for {
+					buf := bufPool[:cap(bufPool)]
+					n, err := targetNew.Read(buf)
+					if err != nil {
+						if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+							return
+						}
+						sf.logger.Errorf("read data from remote %s failed, %v", targetNew.RemoteAddr().String(), err)
+						return
+					}
+					tmpBufPool := sf.bufferPool.Get()
+					proBuf := tmpBufPool
+					proBuf = append(proBuf, pk.Header()...)
+					proBuf = append(proBuf, buf[:n]...)
+					if _, err := bindLn.WriteTo(proBuf, srcAddr); err != nil {
+						sf.bufferPool.Put(tmpBufPool)
+						sf.logger.Errorf("write data to client %s failed, %v", srcAddr, err)
+						return
+					}
+					sf.bufferPool.Put(tmpBufPool)
+				}
+			})
+			if _, err := targetNew.Write(pk.Data); err != nil {
+				sf.logger.Errorf("write data to remote server %s failed, %v", targetNew.RemoteAddr().String(), err)
+				return
 			}
 		}
 	})

@@ -137,9 +137,6 @@ type MiddlewareChain []Middleware
 
 // Execute is used to add interceptors in chain
 func (m MiddlewareChain) Execute(ctx context.Context, writer io.Writer, request *Request, last Handler) error {
-	if len(m) == 0 {
-		return nil
-	}
 	for i := 0; i < len(m); i++ {
 		if err := m[i](ctx, writer, request); err != nil {
 			return err
