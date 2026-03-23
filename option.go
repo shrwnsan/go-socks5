@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/things-go/go-socks5/bufferpool"
+	"github.com/shrwnsan/go-socks5/bufferpool"
 )
 
 // Option user's option
@@ -192,5 +192,14 @@ func WithHandshakeTimeout(d time.Duration) Option {
 func WithMaxConns(max int32) Option {
 	return func(s *Server) {
 		s.maxConns = max
+	}
+}
+
+// WithMetrics sets a custom Metrics implementation for observability.
+func WithMetrics(m Metrics) Option {
+	return func(s *Server) {
+		if m != nil {
+			s.metrics = m
+		}
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/things-go/go-socks5/statute"
+	"github.com/shrwnsan/go-socks5/statute"
 )
 
 func responseFromDialError(err error) uint8 {
@@ -105,6 +105,7 @@ func (sf *Server) handleRequest(ctx context.Context, write io.Writer, req *Reque
 	// Switch on the command
 	switch req.Command {
 	case statute.CommandConnect:
+		sf.metrics.CommandExecuted(statute.CommandConnect)
 		last = sf.handleConnect
 		if sf.userConnectHandle != nil {
 			last = sf.userConnectHandle
@@ -113,6 +114,7 @@ func (sf *Server) handleRequest(ctx context.Context, write io.Writer, req *Reque
 			return sf.userConnectMiddlewares.Execute(ctx, write, req, last)
 		}
 	case statute.CommandBind:
+		sf.metrics.CommandExecuted(statute.CommandBind)
 		last = sf.handleBind
 		if sf.userBindHandle != nil {
 			last = sf.userBindHandle
@@ -121,6 +123,7 @@ func (sf *Server) handleRequest(ctx context.Context, write io.Writer, req *Reque
 			return sf.userBindMiddlewares.Execute(ctx, write, req, last)
 		}
 	case statute.CommandAssociate:
+		sf.metrics.CommandExecuted(statute.CommandAssociate)
 		last = sf.handleAssociate
 		if sf.userAssociateHandle != nil {
 			last = sf.userAssociateHandle
@@ -187,7 +190,7 @@ func (sf *Server) handleConnect(ctx context.Context, writer io.Writer, request *
 	return nil
 }
 
-// handleBind is used to handle a connect command
+// handleBind is used to handle a bind command
 func (sf *Server) handleBind(_ context.Context, writer io.Writer, _ *Request) error {
 	// TODO: Support bind
 	if err := SendReply(writer, statute.RepCommandNotSupported, nil); err != nil {
@@ -196,7 +199,7 @@ func (sf *Server) handleBind(_ context.Context, writer io.Writer, _ *Request) er
 	return nil
 }
 
-// handleAssociate is used to handle a connect command
+// handleAssociate is used to handle a UDP associate command
 func (sf *Server) handleAssociate(ctx context.Context, writer io.Writer, request *Request) error {
 	// Attempt to connect
 	dial := sf.dial
@@ -404,7 +407,7 @@ type closeWriter interface {
 	CloseWrite() error
 }
 
-// Proxy is used to suffle data from src to destination, and sends errors
+// Proxy is used to shuffle data from src to destination, and sends errors
 // down a dedicated channel
 func (sf *Server) Proxy(dst io.Writer, src io.Reader) error {
 	buf := sf.bufferPool.Get()

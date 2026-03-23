@@ -1,6 +1,6 @@
 # 🔐 Security Code Review: go-socks5
 
-**Repository:** github.com/things-go/go-socks5  
+**Repository:** github.com/shrwnsan/go-socks5 (forked from github.com/things-go/go-socks5)  
 **Version:** Latest (as of review)  
 **Reviewer:** Security Audit  
 **Date:** 2026-03-23
@@ -1149,6 +1149,13 @@ If the proxy is exposed publicly, prioritize **timing-attack fixes (#16)** along
 
 ## 🧾 CHANGELOG
 
+### v1.3 — 2026-03-24
+- Fixed comment typos: `handleBind`, `handleAssociate`, and `Proxy` function documentation.
+- Added exported constants: `DefaultBufferSize` (32KB), `DefaultHandshakeTimeout` (10s).
+- Added `Metrics` interface for observability with `NoOpMetrics` default and `WithMetrics()` option.
+- Metrics hooks: `ConnectionOpened`, `ConnectionClosed`, `CommandExecuted`, `AuthSuccess`, `AuthFailure`, `BytesTransferred`.
+- Updated module path from `github.com/things-go/go-socks5` to `github.com/shrwnsan/go-socks5` for fork testing.
+
 ### v1.2 — 2026-03-23
 - Implemented critical fixes: secure default auth opt-in, constant-time password comparison, auth rate limiting interface + helper, handshake deadline, UDP associate race fix, nil IP handling, context propagation + DNS resolution context, error classification, close error handling, AddrSpec validation + port range check, UDP FRAG rejection, bind addr type assertion safety, graceful shutdown + connection tracking + max conns.
 - Added tests for middleware chain, limiter helper, lifecycle, resolver context, and validation paths.
@@ -1185,7 +1192,10 @@ When ready to apply fixes, tackle in this order:
 - [x] Handle Close() errors properly
 
 ### Phase 4: Code Quality
-- [ ] Fix comment typos
+- [x] Fix comment typos
 - [x] Add port range validation
 - [x] Add nil IP check in UDP validation
-- [ ] Add metrics interface
+- [x] Add metrics interface
+
+### Phase 5: Remaining (Style/Optional)
+- [ ] Consistent receiver naming (`sf` vs `s` vs `a` etc.) — deferred, pervasive change

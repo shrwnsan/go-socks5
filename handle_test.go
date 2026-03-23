@@ -11,8 +11,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/things-go/go-socks5/bufferpool"
-	"github.com/things-go/go-socks5/statute"
+	"github.com/shrwnsan/go-socks5/bufferpool"
+	"github.com/shrwnsan/go-socks5/statute"
 )
 
 type MockConn struct {
@@ -51,6 +51,7 @@ func TestRequest_Connect(t *testing.T) {
 		rules:      NewPermitAll(),
 		resolver:   DNSResolver{},
 		logger:     NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags)),
+		metrics:    NoOpMetrics{},
 		bufferPool: bufferpool.NewPool(32 * 1024),
 	}
 
@@ -108,6 +109,7 @@ func TestRequest_Connect_RuleFail(t *testing.T) {
 		rules:      NewPermitNone(),
 		resolver:   DNSResolver{},
 		logger:     NewLogger(log.New(os.Stdout, "socks5: ", log.LstdFlags)),
+		metrics:    NoOpMetrics{},
 		bufferPool: bufferpool.NewPool(32 * 1024),
 	}
 
@@ -142,6 +144,7 @@ func TestRequest_InvalidDest(t *testing.T) {
 		rules:      NewPermitAll(),
 		resolver:   DNSResolver{},
 		logger:     NewLogger(log.New(io.Discard, "socks5: ", log.LstdFlags)),
+		metrics:    NoOpMetrics{},
 		bufferPool: bufferpool.NewPool(32 * 1024),
 	}
 

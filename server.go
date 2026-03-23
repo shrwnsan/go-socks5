@@ -13,8 +13,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/things-go/go-socks5/bufferpool"
-	"github.com/things-go/go-socks5/statute"
+	"github.com/shrwnsan/go-socks5/bufferpool"
+	"github.com/shrwnsan/go-socks5/statute"
+)
+
+const (
+	// DefaultBufferSize is the default size for the proxy buffer pool (32KB).
+	DefaultBufferSize = 32 * 1024
+	// DefaultHandshakeTimeout is the default deadline for auth + request parsing.
+	DefaultHandshakeTimeout = 10 * time.Second
 )
 
 // GPool is used to implement custom goroutine pool default use goroutine
@@ -60,6 +67,8 @@ type Server struct {
 	bufferPool bufferpool.BufPool
 	// goroutine pool
 	gPool GPool
+	// metrics for observability
+	metrics Metrics
 	// handshakeTimeout sets a deadline for auth + request parsing.
 	handshakeTimeout time.Duration
 	// maxConns limits concurrent connections; 0 means unlimited.
@@ -81,12 +90,13 @@ type Server struct {
 // NewServer creates a new Server
 func NewServer(opts ...Option) *Server {
 	srv := &Server{
-		authMethods: []Authenticator{},
-		bufferPool:  bufferpool.NewPool(32 * 1024),
-		resolver:    DNSResolver{},
-		rules:       NewPermitAll(),
-		logger:      NewLogger(log.New(io.Discard, "socks5: ", log.LstdFlags)),
-		handshakeTimeout: 10 * time.Second,
+		authMethods:      []Authenticator{},
+		bufferPool:       bufferpool.NewPool(DefaultBufferSize),
+		resolver:         DNSResolver{},
+		rules:            NewPermitAll(),
+		logger:           NewLogger(log.New(io.Discard, "socks5: ", log.LstdFlags)),
+		metrics:          NoOpMetrics{},
+		handshakeTimeout: DefaultHandshakeTimeout,
 	}
 
 	for _, opt := range opts {
@@ -177,9 +187,11 @@ func (sf *Server) ServeContext(ctx context.Context, l net.Listener) error {
 			atomic.AddInt32(&sf.conns, 1)
 		}
 		sf.wg.Add(1)
+		sf.metrics.ConnectionOpened()
 		sf.goFunc(func() {
 			defer sf.wg.Done()
 			defer atomic.AddInt32(&sf.conns, -1)
+			defer sf.metrics.ConnectionClosed()
 			if err := sf.ServeConn(conn); err != nil {
 				sf.logger.Errorf("server: %v", err)
 			}
