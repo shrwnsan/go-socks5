@@ -4,6 +4,7 @@
 **Version:** Latest (as of review)  
 **Reviewer:** Security Audit  
 **Date:** 2026-03-23
+**Document Version:** v1.1
 
 ---
 
@@ -899,3 +900,287 @@ func (sf *AddrSpec) Validate() error {
 7. Code style improvements (#3, #4, #5, #6)
 8. Metrics interface (#10)
 9. Validation improvements (#14, #15)
+
+---
+
+## 🔍 ADDITIONAL FINDINGS (Independent Review - 2026-03-23)
+
+*Findings discovered during secondary review by Claude Code (GLM 5)*
+
+---
+
+### 🟠 MEDIUM SEVERITY
+
+### 16. Timing Attack in Password Comparison
+
+**Location:** `credentials.go:13-15`
+
+```go
+func (s StaticCredentials) Valid(user, password, _ string) bool {
+    pass, ok := s[user]
+    return ok && password == pass  // ⚠️ String comparison - not constant-time
+}
+```
+
+**Risk:** Uses `==` for password comparison, which is vulnerable to timing attacks. An attacker can measure response times to iteratively guess the correct password byte-by-byte.
+
+**Fix:**
+```go
+import "crypto/subtle"
+
+func (s StaticCredentials) Valid(user, password, _ string) bool {
+    pass, ok := s[user]
+    if !ok {
+        return false
+    }
+    return subtle.ConstantTimeCompare([]byte(password), []byte(pass)) == 1
+}
+```
+
+---
+
+### 17. Race Condition in UDP Associate Connection Map
+
+**Location:** `handle.go:255-263`
+
+```go
+if target, ok := conns.Load(connKey); !ok {
+    targetNew, err := dial(ctx, "udp", pk.DstAddr.String())
+    if err != nil {
+        sf.logger.Errorf("connect to %v failed, %v", pk.DstAddr, err)
+        continue
+    }
+    conns.Store(connKey, targetNew)
+    // ...
+}
+```
+
+**Risk:** Check-then-act pattern with `sync.Map` - two goroutines processing packets for the same destination could race to create duplicate connections. One connection would be leaked.
+
+**Fix:** Use atomic `LoadOrStore`:
+```go
+targetNew, err := dial(ctx, "udp", pk.DstAddr.String())
+if err != nil {
+    sf.logger.Errorf("connect to %v failed, %v", pk.DstAddr, err)
+    continue
+}
+actual, loaded := conns.LoadOrStore(connKey, targetNew)
+if loaded {
+    targetNew.Close() // Close the duplicate
+    target = actual.(net.Conn)
+} else {
+    target = targetNew
+    // Start relay goroutine...
+}
+```
+
+---
+
+### 18. Context Ignored in DNS Resolution
+
+**Location:** `resolver.go:17-22`
+
+```go
+func (d DNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
+    addr, err := net.ResolveIPAddr("ip", name)  // ⚠️ ctx not used!
+    return ctx, addr.IP, err
+}
+```
+
+**Risk:** Context is accepted but completely ignored. DNS resolution cannot be cancelled, which can cause hangs during shutdown or timeout scenarios.
+
+**Fix:** Use `net.Resolver` with context:
+```go
+func (d DNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
+    resolver := &net.Resolver{}
+    ips, err := resolver.LookupIPAddr(ctx, name)
+    if err != nil || len(ips) == 0 {
+        return ctx, nil, err
+    }
+    return ctx, ips[0].IP, nil
+}
+```
+
+---
+
+### 🟡 LOW SEVERITY
+
+### 19. Missing Port Range Validation
+
+**Location:** `statute/addr.go:47-49`
+
+```go
+as.Port, err = strconv.Atoi(port)
+if err != nil {
+    return
+}
+// ⚠️ No check for valid port range (0-65535)
+```
+
+**Risk:** Malformed input could produce negative or overflow ports without error, leading to unexpected behavior.
+
+**Fix:**
+```go
+as.Port, err = strconv.Atoi(port)
+if err != nil {
+    return
+}
+if as.Port < 0 || as.Port > 65535 {
+    err = fmt.Errorf("invalid port number: %d", as.Port)
+    return
+}
+```
+
+---
+
+### 20. Unhandled Write Error in authenticate
+
+**Location:** `server.go:194`
+
+```go
+conn.Write([]byte{statute.VersionSocks5, statute.MethodNoAcceptable}) //nolint: errcheck
+```
+
+**Risk:** Error ignored when sending "no acceptable method" response. Client may hang indefinitely waiting for a response that was never sent.
+
+**Fix:**
+```go
+if _, err := conn.Write([]byte{statute.VersionSocks5, statute.MethodNoAcceptable}); err != nil {
+    return nil, fmt.Errorf("failed to send method rejection: %w", err)
+}
+return nil, statute.ErrNoSupportedAuth
+```
+
+---
+
+### 21. Nil IP Check Missing in UDP Source Validation
+
+**Location:** `handle.go:248`
+
+```go
+srcEqual := ((request.DestAddr.IP.IsUnspecified()) || request.DestAddr.IP.Equal(srcAddr.IP)) &&
+            (request.DestAddr.Port == 0 || request.DestAddr.Port == srcAddr.Port)
+```
+
+**Risk:** If `request.DestAddr.IP` is nil (not just unspecified), calling `IsUnspecified()` may panic or behave unexpectedly.
+
+**Fix:**
+```go
+srcEqual := (len(request.DestAddr.IP) == 0 || request.DestAddr.IP.IsUnspecified() || request.DestAddr.IP.Equal(srcAddr.IP)) &&
+            (request.DestAddr.Port == 0 || request.DestAddr.Port == srcAddr.Port)
+```
+
+---
+
+## 📊 UPDATED QUALITY IMPROVEMENTS SUMMARY
+
+| # | Priority | Category | Issue |
+|---|----------|----------|-------|
+| 1 | 🔴 High | Bug | Middleware skips handler when empty |
+| 2 | 🟡 Low | Docs | Comment typos and copy-paste errors |
+| 3 | 🟡 Low | Style | Inconsistent receiver naming |
+| 4 | 🟡 Low | Style | Magic numbers without constants |
+| 5 | 🟠 Medium | DRY | Duplicate command handling pattern |
+| 6 | 🟠 Medium | Maintainability | UDP handler too long/nested |
+| 7 | 🔴 High | Feature | No graceful shutdown support |
+| 8 | 🟠 Medium | Feature | No connection tracking for drain |
+| 9 | 🔴 High | Robustness | No maximum connection limit |
+| 10 | 🟡 Low | Feature | No metrics/observability interface |
+| 11 | 🟠 Medium | Robustness | Ignored Close() errors |
+| 12 | 🟠 Medium | Robustness | String-based error matching |
+| 13 | 🟠 Medium | Feature | Context not propagated |
+| 14 | 🟠 Medium | Correctness | bufio.Reader buffering issue |
+| 15 | 🟡 Low | Robustness | Missing AddrSpec validation |
+| 16 | 🟠 Medium | Security | Timing attack in password comparison |
+| 17 | 🟠 Medium | Concurrency | Race condition in UDP connection map |
+| 18 | 🟠 Medium | Feature | Context ignored in DNS resolution |
+| 19 | 🟡 Low | Validation | Missing port range validation |
+| 20 | 🟡 Low | Robustness | Unhandled Write error in authenticate |
+| 21 | 🟡 Low | Robustness | Nil IP check missing in UDP validation |
+
+---
+
+## 🎯 UPDATED RECOMMENDED PRIORITY
+
+**Fix Immediately (Security/Correctness):**
+1. Middleware chain bug (#1) - breaks functionality
+2. Graceful shutdown (#7) - production requirement
+3. Max connection limit (#9) - DoS protection
+4. **Timing attack in password comparison (#16)** - security vulnerability
+5. **Race condition in UDP map (#17)** - resource leak
+
+If the proxy is exposed publicly, prioritize **timing-attack fixes (#16)** alongside the open-proxy default and auth hardening.
+
+**Fix Soon (Production Readiness):**
+6. Connection tracking (#8)
+7. Close() error handling (#11)
+8. Context propagation (#13)
+9. **Context in DNS resolution (#18)**
+10. **Use errors.Is/As instead of string matching (#12)**
+
+**Nice to Have:**
+11. Code style improvements (#3, #4, #5, #6)
+12. Metrics interface (#10)
+13. Validation improvements (#14, #15, #19, #20, #21)
+
+---
+
+## 📈 REVIEW COMPARISON
+
+| Metric | Original Review | Independent Review |
+|--------|-----------------|-------------------|
+| High Severity | 3 | 3 (confirmed) |
+| Medium Severity | 8 | 11 (+3 new) |
+| Low Severity | 4 | 6 (+2 new) |
+| **Total Issues** | **15** | **21** |
+
+### Key Differences
+
+| Finding | Original | Independent |
+|---------|----------|-------------|
+| Timing attack | Not mentioned | 🟠 Medium |
+| UDP race condition | Not mentioned | 🟠 Medium |
+| Context in DNS | Not mentioned | 🟠 Medium |
+| Port validation | Mentioned in Validate() | Found in ParseAddrSpec |
+| bufio.Reader | 🟠 Medium | Considered low risk (protocol is request-response) |
+| UDP source validation | Listed as potential bypass | Considered intentional per RFC 1928 |
+
+---
+
+## 🧾 CHANGELOG
+
+### v1.1 — 2026-03-23
+- Added independent review deltas: timing attack in password comparison, UDP associate race condition, DNS resolution context usage, port range validation, unhandled write error in auth, and nil IP handling in UDP validation.
+- Expanded review comparison metrics and recommendations.
+
+### v1.0 — 2026-03-23
+- Initial security and code quality evaluation.
+
+---
+
+## 🔧 IMPLEMENTATION CHECKLIST
+
+When ready to apply fixes, tackle in this order:
+
+### Phase 1: Critical Bug Fixes
+- [ ] Fix middleware chain (`option.go:138-148`)
+- [ ] Add constant-time password comparison (`credentials.go`)
+- [ ] Add type assertion safety check (`handle.go:202`)
+
+### Phase 2: Concurrency & Resource Management
+- [ ] Use `LoadOrStore` in UDP associate (`handle.go:255-263`)
+- [ ] Add graceful shutdown with `Shutdown(ctx)` method
+- [ ] Add max connection limit with atomic counter
+- [ ] Add `sync.WaitGroup` for connection tracking
+
+### Phase 3: Context & Error Handling
+- [ ] Propagate context through request handling
+- [ ] Honor context in DNS resolution
+- [ ] Use `errors.Is/As` for error classification
+- [ ] Handle Close() errors properly
+
+### Phase 4: Code Quality
+- [ ] Fix comment typos
+- [ ] Add port range validation
+- [ ] Add nil IP check in UDP validation
+- [ ] Add metrics interface
