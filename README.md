@@ -29,6 +29,27 @@ The package has the following features:
 - buffer pool design and optional custom buffer pool
 - Custom logger
 
+### Security Note
+
+`No Auth` mode creates an open proxy. Enable it only when you explicitly intend to run without authentication:
+
+```go
+server := socks5.NewServer(
+    socks5.WithAllowNoAuth(true),
+)
+```
+
+To rate-limit auth attempts, attach a limiter to `UserPassAuthenticator`:
+
+```go
+limiter := socks5.NewFixedWindowLimiter(5, time.Minute)
+credStore := socks5.StaticCredentials{"user": "pass"}
+cator := socks5.UserPassAuthenticator{
+    Credentials: credStore,
+    Limiter: limiter,
+}
+```
+
 ### TODO
 
 The package still needs the following:

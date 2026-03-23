@@ -90,6 +90,7 @@ func NewServer(opts ...Option) *Server {
 		srv.authMethods = []Authenticator{&UserPassAuthenticator{Credentials: srv.credentials}}
 	}
 	if len(srv.authMethods) == 0 && srv.allowNoAuth {
+		srv.logger.Errorf("server: no-auth mode enabled; this creates an open proxy")
 		srv.authMethods = []Authenticator{&NoAuthAuthenticator{}}
 	}
 
